@@ -1,10 +1,14 @@
 package com.example.animated_card_swiping;
 
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.ScaleAnimation;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
+import android.view.animation.OvershootInterpolator;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -20,6 +24,11 @@ public class MainActivity extends AppCompatActivity {
 
     private ActivityMainBinding binding;
     private ImageViewPagerAdapter imageViewPagerAdapter;
+
+    View centerRing;
+    ScaleAnimation pulse;
+    int lastSwipeDirection = 0; // -1 for left, 1 for right
+
 
     private final ViewPager2.OnPageChangeCallback pageChangeCallback = new ViewPager2.OnPageChangeCallback() {
         @Override
@@ -40,6 +49,7 @@ public class MainActivity extends AppCompatActivity {
             return insets;
         });
 
+        centerRing = findViewById(R.id.center_ring);
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -54,6 +64,26 @@ public class MainActivity extends AppCompatActivity {
 
         imageViewPagerAdapter = new ImageViewPagerAdapter(imageUrlList);
         setUpViewPager();
+
+        centerRing = findViewById(R.id.center_ring);
+
+        // Pulse Animation
+        pulse = new ScaleAnimation(
+                1f, 1.1f,
+                1f, 1.1f,
+                Animation.RELATIVE_TO_SELF, 0.5f,
+                Animation.RELATIVE_TO_SELF, 0.5f);
+
+        pulse.setDuration(500);
+        pulse.setRepeatMode(Animation.REVERSE);
+        pulse.setRepeatCount(Animation.INFINITE);
+
+        centerRing.startAnimation(pulse);
+
+
+        applyCenterRingPulse();
+        applyInteractiveGesture();
+
     }
 
     @Override
@@ -62,8 +92,66 @@ public class MainActivity extends AppCompatActivity {
         binding.viewPager.unregisterOnPageChangeCallback(pageChangeCallback);
     }
 
-    private void setUpViewPager() {
+    private void applyCenterRingPulse() {
+        ScaleAnimation pulse = new ScaleAnimation(
+                1f, 1.1f,
+                1f, 1.1f,
+                Animation.RELATIVE_TO_SELF, 0.5f,
+                Animation.RELATIVE_TO_SELF, 0.5f
+        );
+        pulse.setDuration(500);
+        pulse.setRepeatMode(Animation.REVERSE);
+        pulse.setRepeatCount(Animation.INFINITE);
+        centerRing.startAnimation(pulse);
+    }
 
+    private void applyInteractiveGesture() {
+        centerRing.setOnTouchListener(new View.OnTouchListener() {
+            float startX;
+
+            @Override
+            public boolean onTouch(View view, MotionEvent event) {
+                // Forward this touch to ViewPager2
+                binding.viewPager.dispatchTouchEvent(event);
+
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startX = event.getX();
+                        return true;
+
+                    case MotionEvent.ACTION_MOVE:
+                        float deltaX = event.getX() - startX;
+                        centerRing.setTranslationX(deltaX / 2f); // Optional visual movement
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        resetPokeBall();
+                        view.performClick();
+                        return true;
+                }
+                return true;
+            }
+        });
+    }
+
+    private void resetPokeBall() {
+        centerRing.clearAnimation(); // Stop pulse to prevent flicker
+
+        centerRing.animate()
+                .translationX(0f)
+                .scaleX(1f)
+                .rotation(0f)
+                .setInterpolator(new OvershootInterpolator())
+                .setDuration(400)
+                .withEndAction(() -> {
+                    // Restart pulse after bounce completes
+                    centerRing.startAnimation(pulse);
+                })
+                .start();
+    }
+
+    private void setUpViewPager() {
         // This allows child views (pages) to draw beyond the ViewPager’s edges
         binding.viewPager.setClipToPadding(false);
 
@@ -117,11 +205,21 @@ public class MainActivity extends AppCompatActivity {
 
         binding.viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
             @Override
+            public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
+                super.onPageScrolled(position, positionOffset, positionOffsetPixels);
+                float maxTranslation = 50f;
+                float offset = (0.5f - positionOffset) * 2 * maxTranslation;
+                centerRing.setTranslationX(offset);
+                lastSwipeDirection = offset < 0 ? -1 : 1;
+            }
+
+            @Override
             public void onPageScrollStateChanged(int state) {
                 super.onPageScrollStateChanged(state);
+
                 if (state == ViewPager2.SCROLL_STATE_IDLE) {
-                    int position = binding.viewPager.getCurrentItem();
-                    binding.viewPager.setCurrentItem(position, true); // force gentle re-snap
+                    // Delay bounce reset to avoid layout timing conflicts
+                    centerRing.postDelayed(() -> resetPokeBall(), 100);
                 }
             }
         });
